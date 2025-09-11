@@ -235,7 +235,7 @@ SELECT patient_id,
 COUNT(appointment_id) AS total_appointments
 FROM appointments
 GROUP BY patient_id;
-    
+
 
 --Find the minimum, maximum, and average treatment cost per treatment type.
 
@@ -320,6 +320,74 @@ INNER JOIN patients AS p
     ON b.patient_id = p.patient_id      
 INNER JOIN doctors AS d
     ON a.doctor_id = d.doctor_id;
+
+
+--Which specialization generates the highest total revenue for the hospital?  
+
+SELECT 
+    d.specialization, 
+	SUM(b.amount) AS total_revenue
+FROM doctors  AS d
+INNER JOIN appointments AS a 
+ON d.doctor_id = a.doctor_id
+INNER JOIN treatments AS t 
+ON a.appointment_id = t.appointment_id
+INNER JOIN billing AS b 
+ON t.treatment_id = b.treatment_id
+GROUP BY d.specialization
+ORDER BY total_revenue DESC;
+
+
+--Which treatments cost higher than billed amount?
+
+SELECT 
+    t.treatment_id, 
+	t.treatment_type, 
+	t.cost,
+	b.amount
+FROM treatments AS t
+INNER JOIN billing AS b
+ON t.treatment_id = b.treatment_id
+WHERE t.cost > b.amount;
+
+
+--Who are the top 5 patients based on total spending?  
+
+SELECT 
+    p.patient_id, 
+	p.first_name, 
+	p.last_name, 
+    SUM(b.amount) AS total_spent
+FROM patients p
+INNER JOIN billing AS b 
+ON p.patient_id = b.patient_id
+GROUP BY p.patient_id, p.first_name, p.last_name
+ORDER BY total_spent DESC
+LIMIT 5;
+
+
+-- Which appointments were cancelled or marked as 'No-Show'?
+
+SELECT
+    a.appointment_id,
+	p.first_name, 
+	p.last_name, 
+	a.appointment_date, 
+	a.status
+FROM appointments  AS a
+INNER JOIN patients AS p 
+ON a.patient_id = p.patient_id
+WHERE a.status IN ('Cancelled','No-Show');
+
+
+--Calculate the percentage of appointments cancelled or marked as no-show.
+
+SELECT 
+    ROUND(
+        (SUM(CASE WHEN status IN ('Cancelled', 'No-Show') THEN 1 ELSE 0 END) * 100.0)
+        / COUNT(*), 2
+    ) AS cancellation_noshow_percentage
+FROM appointments;
 
 
 --Find all appointments along with the billing amount  and treatment type.
@@ -454,7 +522,7 @@ WHERE appointment_date = (SELECT MAX (appointment_date)
 );
 
 
---Retrieve treatments whose cost is higher than the average cost for that treatment type
+--Find treatments whose cost is higher than the average cost for that treatment type
 
 SELECT 
     t.treatment_id,
@@ -466,6 +534,18 @@ WHERE t.cost > (
     FROM treatments AS t2
     WHERE t2.treatment_type = t.treatment_type
 );
+
+
+--Find percentage of treatments where treatment cost exceeds billed amount (possible revenue leakage).
+
+SELECT 
+    ROUND(
+        (SUM(CASE WHEN t.cost > b.amount THEN 1 ELSE 0 END) * 100.0)
+        / COUNT(*), 2
+    ) AS revenue_leakage_percentage
+FROM treatments AS t
+JOIN billing AS b
+  ON t.treatment_id = b.treatment_id;
 
 
 --Find patients who have spent more than the average billing amount.
@@ -552,3 +632,22 @@ FROM patients AS p
 INNER JOIN billing AS b
 ON b.patient_id = p.patient_id
 GROUP BY p.patient_id, p.first_name, p.last_name;
+
+
+--Determine what percentage of total revenue top 5% patients contribute.
+
+WITH patient_revenue AS (
+    SELECT patient_id, SUM(amount) AS total_spent
+    FROM billing
+    GROUP BY patient_id
+),
+top_patients AS (
+    SELECT patient_id, total_spent
+    FROM patient_revenue
+    ORDER BY total_spent DESC
+    LIMIT CEIL(0.05 * (SELECT COUNT(*) FROM patient_revenue))
+)
+SELECT 
+    ROUND((SUM(total_spent) * 100.0) / (SELECT SUM(total_spent) FROM patient_revenue), 2) AS top5_percent_revenue
+FROM top_patients;
+
